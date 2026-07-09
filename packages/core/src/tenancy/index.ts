@@ -1,0 +1,1 @@
+export { withTenant } from "./scopedClient";

@@ -1,0 +1,160 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  GESTOR
+  TRATADOR
+  VENDEDOR
+}
+
+enum LeadStatus {
+  NOVO
+  EM_ATENDIMENTO
+  EM_NEGOCIACAO
+  GANHO
+  PERDIDO
+}
+
+enum LeadEventType {
+  STATUS_CHANGE
+  NOTE
+  ASSIGNMENT
+  ALERT
+  CONTACT
+}
+
+enum AlertLevel {
+  WARNING
+  CRITICAL
+}
+
+model Tenant {
+  id               String   @id @default(cuid())
+  name             String
+  slug             String   @unique
+  // { warningMinutes: number, criticalMinutes: number }
+  alertThresholds  Json     @default("{\"warningMinutes\": 15, \"criticalMinutes\": 30}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  users              User[]
+  leads              Lead[]
+  alerts             Alert[]
+  distributionState  DistributionState?
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  tenantId     String
+  name         String
+  // Globally unique (not per-tenant): login is by e-mail alone, and the
+  // account's tenant is derived from the matched user, so a person doesn't
+  // juggle "which company am I logging into" at the login screen.
+  email        String   @unique
+  passwordHash String
+  role         Role
+  active       Boolean  @default(true)
+  // Only meaningful for VENDEDOR: whether they receive leads in the round-robin queue
+  inRotation   Boolean  @default(true)
+  // Position in the round-robin queue, lower runs first
+  rotationOrder Int     @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant                Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedLeads         Lead[]              @relation("AssignedLeads")
+  createdLeads          Lead[]              @relation("CreatedLeads")
+  leadEvents            LeadEvent[]
+  // Not truly 1:1: the FK below isn't unique, though in practice a user only
+  // ever belongs to one tenant, so at most one DistributionState references them.
+  lastAssignedForStates DistributionState[] @relation("LastAssignedUser")
+
+  @@index([tenantId, role])
+  @@map("users")
+}
+
+model Lead {
+  id               String     @id @default(cuid())
+  tenantId         String
+  name             String
+  phone            String?
+  email            String?
+  source           String?
+  status           LeadStatus @default(NOVO)
+  assignedToId     String?
+  createdById      String?
+  // Updated every time there is a new interaction; the idle timer counts from here
+  lastInteractionAt DateTime  @default(now())
+  assignedAt       DateTime?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignedTo User?       @relation("AssignedLeads", fields: [assignedToId], references: [id])
+  createdBy  User?       @relation("CreatedLeads", fields: [createdById], references: [id])
+  events     LeadEvent[]
+  alerts     Alert[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, assignedToId])
+  @@index([tenantId, lastInteractionAt])
+  @@map("leads")
+}
+
+model LeadEvent {
+  id        String        @id @default(cuid())
+  leadId    String
+  authorId  String?
+  type      LeadEventType
+  message   String?
+  // Arbitrary structured payload (e.g. { from: "NOVO", to: "EM_ATENDIMENTO" })
+  payload   Json?
+  createdAt DateTime      @default(now())
+
+  lead   Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id])
+
+  @@index([leadId, createdAt])
+  @@map("lead_events")
+}
+
+model Alert {
+  id               String     @id @default(cuid())
+  tenantId         String
+  leadId           String
+  level            AlertLevel
+  triggeredAt      DateTime   @default(now())
+  resolvedAt       DateTime?
+  escalatedToGestor Boolean   @default(false)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, resolvedAt])
+  @@index([leadId, level])
+  @@map("alerts")
+}
+
+// One row per tenant. Tracks the last vendedor who received a lead so the
+// round-robin distribution can pick the next one in line, even across
+// concurrent requests (guarded by SELECT ... FOR UPDATE in the application).
+model DistributionState {
+  id               String   @id @default(cuid())
+  tenantId         String   @unique
+  lastAssignedUserId String?
+  updatedAt        DateTime @updatedAt
+
+  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lastAssignedUser User? @relation("LastAssignedUser", fields: [lastAssignedUserId], references: [id])
+
+  @@map("distribution_states")
+}

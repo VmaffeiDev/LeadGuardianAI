@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-leadguardian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-leadguardian}
+      POSTGRES_DB: ${POSTGRES_DB:-leadguardianai}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-leadguardian}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-off container: applies pending Prisma migrations, then exits. web/worker
+  # wait for it to finish successfully before starting.
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: build
+    command: pnpm --filter @leadguardian/db exec prisma migrate deploy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadguardian}:${POSTGRES_PASSWORD:-leadguardian}@postgres:5432/${POSTGRES_DB:-leadguardianai}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Seeds the demo tenant + test users + demo leads. Opt-in (profile) so it
+  # doesn't re-run on every `docker compose up`: run it explicitly with
+  # `docker compose --profile seed run --rm seed`.
+  seed:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: build
+    command: pnpm db:seed
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadguardian}:${POSTGRES_PASSWORD:-leadguardian}@postgres:5432/${POSTGRES_DB:-leadguardianai}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    profiles: ["seed"]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadguardian}:${POSTGRES_PASSWORD:-leadguardian}@postgres:5432/${POSTGRES_DB:-leadguardianai}
+      REDIS_URL: redis://redis:6379
+      AUTH_SECRET: ${AUTH_SECRET:?defina AUTH_SECRET no .env}
+      AUTH_URL: ${AUTH_URL:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-leadguardian}:${POSTGRES_PASSWORD:-leadguardian}@postgres:5432/${POSTGRES_DB:-leadguardianai}
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
