@@ -1,6 +1,9 @@
 import { LeadEventType, LeadStatus, type PrismaClient } from "@leadguardian/db";
 
 const VALID_TRANSITIONS: Record<LeadStatus, LeadStatus[]> = {
+  // System-driven: a lead imported for WhatsApp triage moves to NOVO once
+  // classified QUENTE/MORNO and distributed (see whatsapp/triage.ts).
+  [LeadStatus.EM_TRIAGEM]: [LeadStatus.NOVO],
   [LeadStatus.NOVO]: [LeadStatus.EM_ATENDIMENTO, LeadStatus.PERDIDO],
   [LeadStatus.EM_ATENDIMENTO]: [LeadStatus.EM_NEGOCIACAO, LeadStatus.PERDIDO],
   [LeadStatus.EM_NEGOCIACAO]: [LeadStatus.GANHO, LeadStatus.PERDIDO, LeadStatus.EM_ATENDIMENTO],
@@ -16,10 +19,12 @@ export function canTransition(from: LeadStatus, to: LeadStatus): boolean {
  * Moves a lead to a new status, recording the transition in its timeline.
  * A status change counts as an interaction, so it also resets the idle timer.
  * Throws if the transition isn't allowed by the lead status state machine.
+ * `authorId` is omitted for system-driven transitions (e.g. WhatsApp triage
+ * completing) — the timeline entry is then recorded without an author.
  */
 export async function changeLeadStatus(
   prisma: PrismaClient,
-  params: { tenantId: string; leadId: string; to: LeadStatus; authorId: string; note?: string },
+  params: { tenantId: string; leadId: string; to: LeadStatus; authorId?: string; note?: string },
 ) {
   const { tenantId, leadId, to, authorId, note } = params;
 

@@ -1,18 +1,36 @@
-import { scheduleIdleScan, createIdleScanWorker } from "./queue";
+import {
+  scheduleIdleScan,
+  createIdleScanWorker,
+  scheduleStartPendingTriages,
+  createStartTriagesWorker,
+  scheduleTriageTimeouts,
+  createTriageTimeoutsWorker,
+  createWhatsappClassifyWorker,
+} from "./queue";
 import { runIdleLeadsScan } from "./jobs/scanIdleLeads";
+import { runStartPendingTriages } from "./jobs/startPendingTriages";
+import { runTriageTimeouts } from "./jobs/triageTimeouts";
+import { runClassifyReply } from "./jobs/classifyReply";
 
 async function main() {
-  await scheduleIdleScan();
+  await Promise.all([scheduleIdleScan(), scheduleStartPendingTriages(), scheduleTriageTimeouts()]);
 
-  const worker = createIdleScanWorker(async () => {
-    await runIdleLeadsScan();
-  });
+  const workers = [
+    createIdleScanWorker(runIdleLeadsScan),
+    createStartTriagesWorker(runStartPendingTriages),
+    createTriageTimeoutsWorker(runTriageTimeouts),
+    createWhatsappClassifyWorker(runClassifyReply),
+  ];
 
-  worker.on("failed", (job, err) => {
-    console.error(`[worker] job ${job?.id} falhou:`, err);
-  });
+  for (const worker of workers) {
+    worker.on("failed", (job, err) => {
+      console.error(`[worker] job ${job?.id} (${worker.name}) falhou:`, err);
+    });
+  }
 
-  console.log("[worker] LeadGuardianAI worker iniciado, varrendo leads a cada 30s");
+  console.log(
+    "[worker] LeadGuardianAI worker iniciado — leads parados a cada 30s, triagens WhatsApp a cada 1min, timeouts a cada 15min",
+  );
 }
 
 main().catch((err) => {

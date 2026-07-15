@@ -13,7 +13,10 @@ funil.
 - **Prisma** + **PostgreSQL**
 - **Auth.js (NextAuth v5)** — login por credenciais, sessão JWT, RBAC
 - **Socket.IO** (servidor custom sobre o Next.js) + **Redis** — dashboard e alertas em tempo real
-- **BullMQ** — worker de background que cronometra os leads e dispara alertas
+- **BullMQ** — worker de background que cronometra os leads, dispara alertas e roda a
+  triagem automática via WhatsApp
+- **Meta Cloud API (WhatsApp)** + **Anthropic (Claude)** — contato automático e
+  classificação de leads importados em quente/morno/frio
 - **Docker Compose** — stack completa self-hosted
 
 ## Arquitetura
@@ -44,6 +47,29 @@ query de modelo pertencente a um tenant.
 | **Gestor** | Dashboard em tempo real, ranking, métricas, ver/reatribuir todos os leads, gerenciar vendedores |
 | **Tratador de Leads** | Cadastrar leads (entram automaticamente na distribuição round-robin) |
 | **Vendedor** | Ver e trabalhar apenas os próprios leads, atualizar status, registrar contato |
+
+## Importação de leads + triagem automática via WhatsApp
+
+Além do cadastro manual, o Admin/Tratador pode importar um relatório em CSV (nome,
+telefone/whatsapp, carro de interesse — em **Leads → Importar CSV**). Cada lead
+importado entra em **triagem** em vez de ser distribuído na hora:
+
+1. O worker envia uma mensagem de template aprovado via WhatsApp (Meta Cloud API).
+2. Quando o lead responde, o webhook (`/api/webhooks/whatsapp`) recebe a mensagem e o
+   worker classifica a conversa em **quente / morno / frio** usando Claude.
+3. Quente e morno são distribuídos automaticamente pro vendedor da vez (mesmo
+   round-robin de sempre — a "prioridade" do quente é visual, não muda a ordem de
+   rodízio entre vendedores). Frio fica retido, visível na lista de leads, com uma ação
+   manual "Distribuir mesmo assim" pro gestor.
+4. Lead que não responde em 6h é classificado como frio automaticamente.
+
+**Pré-requisitos fora do código**, sem os quais essa funcionalidade não funciona:
+- Template de mensagem aprovado no Meta Business Manager (obrigatório pro primeiro
+  contato com quem nunca falou com o número).
+- Phone Number ID + token de acesso do WABA, e o "App Secret" do Meta App.
+- Webhook configurado no painel do Meta apontando pra `https://seu-dominio/api/webhooks/whatsapp`
+  — só funciona com uma URL pública, não em localhost/Codespace.
+- Configurar o Phone Number ID e o nome do template em **Configurações**, dentro do app.
 
 ## Rodando com Docker Compose (recomendado)
 
@@ -103,6 +129,10 @@ estado de aviso/crítico) para o dashboard e o ranking já nascerem com dados.
 | `AUTH_SECRET` | web | Segredo usado para assinar a sessão JWT |
 | `AUTH_URL` | web | Deixe vazio em HTTP puro; defina `https://...` quando houver TLS na frente (ativa o cookie `__Secure-`) |
 | `PORT` | web | Porta do servidor Next.js (padrão 3000) |
+| `WHATSAPP_ACCESS_TOKEN` | worker | Token de acesso do WABA — opcional, só necessário pra triagem via WhatsApp |
+| `WHATSAPP_VERIFY_TOKEN` | web | Confirma o handshake de verificação do webhook do Meta — opcional |
+| `WHATSAPP_APP_SECRET` | web | Valida a assinatura de cada webhook recebido do Meta — opcional |
+| `ANTHROPIC_API_KEY` | worker | Classifica a resposta do lead em quente/morno/frio — opcional |
 
 ## Scripts principais
 
@@ -122,10 +152,12 @@ pnpm db:studio            # Prisma Studio
 distribuição round-robin automática, cronômetro de tempo sem resposta, alertas in-app
 em tempo real (aviso → crítico, com escalonamento ao gestor), dashboard do gestor ao
 vivo, timeline/histórico por lead, status do lead, ranking de vendedores, tempo médio
-de resposta.
+de resposta, importação de leads em CSV com triagem automática via WhatsApp + IA
+(quente/morno/frio).
 
-**Fica para V2:** alertas por e-mail/WhatsApp/SMS, captação automática de leads
-(Facebook Lead Ads, formulário de site, importação em massa), regras de distribuição
-avançadas (por especialidade, por carga), Row-Level Security nativa no Postgres,
-billing/assinatura, relatórios exportáveis, automação de follow-up, auditoria completa
-(LGPD), SSO/SAML, app mobile/PWA, suíte completa de testes e2e.
+**Fica para V2:** conversas multi-turno de WhatsApp / sequência de reengajamento,
+reclassificação manual da temperatura pelo gestor, alertas por e-mail/SMS, integração
+direta com CRMs de terceiros (webhook), regras de distribuição avançadas (por
+especialidade, por carga), Row-Level Security nativa no Postgres, billing/assinatura,
+relatórios exportáveis, auditoria completa (LGPD), SSO/SAML, app mobile/PWA, suíte
+completa de testes e2e.
