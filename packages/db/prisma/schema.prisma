@@ -15,6 +15,8 @@ enum Role {
 }
 
 enum LeadStatus {
+  // Imported lead being contacted via WhatsApp, not yet assigned to a vendedor.
+  EM_TRIAGEM
   NOVO
   EM_ATENDIMENTO
   EM_NEGOCIACAO
@@ -28,11 +30,23 @@ enum LeadEventType {
   ASSIGNMENT
   ALERT
   CONTACT
+  WHATSAPP
 }
 
 enum AlertLevel {
   WARNING
   CRITICAL
+}
+
+enum LeadTemperature {
+  QUENTE
+  MORNO
+  FRIO
+}
+
+enum WhatsappDirection {
+  OUT
+  IN
 }
 
 model Tenant {
@@ -41,12 +55,17 @@ model Tenant {
   slug             String   @unique
   // { warningMinutes: number, criticalMinutes: number }
   alertThresholds  Json     @default("{\"warningMinutes\": 15, \"criticalMinutes\": 30}")
+  // Maps an inbound WhatsApp webhook (keyed by Meta's phone_number_id) back to this
+  // tenant, and picks which approved template to send when starting a triage.
+  whatsappPhoneNumberId String? @unique
+  whatsappTemplateName  String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   users              User[]
   leads              Lead[]
   alerts             Alert[]
+  whatsappMessages   WhatsappMessage[]
   distributionState  DistributionState?
 
   @@map("tenants")
@@ -98,11 +117,19 @@ model Lead {
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
+  // WhatsApp triage fields — only populated for leads imported via CSV.
+  whatsapp         String?
+  carInterest      String?
+  temperature      LeadTemperature?
+  triageStartedAt  DateTime?
+  whatsappOptOut   Boolean   @default(false)
+
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   assignedTo User?       @relation("AssignedLeads", fields: [assignedToId], references: [id])
   createdBy  User?       @relation("CreatedLeads", fields: [createdById], references: [id])
   events     LeadEvent[]
   alerts     Alert[]
+  whatsappMessages WhatsappMessage[]
 
   @@index([tenantId, status])
   @@index([tenantId, assignedToId])
@@ -157,4 +184,24 @@ model DistributionState {
   lastAssignedUser User? @relation("LastAssignedUser", fields: [lastAssignedUserId], references: [id])
 
   @@map("distribution_states")
+}
+
+// One row per WhatsApp message sent or received during a lead's triage.
+model WhatsappMessage {
+  id          String            @id @default(cuid())
+  tenantId    String
+  leadId      String
+  direction   WhatsappDirection
+  body        String
+  // Meta's message id, for dedup / delivery-status correlation.
+  waMessageId String?
+  status      String?
+  createdAt   DateTime          @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([tenantId, waMessageId])
+  @@map("whatsapp_messages")
 }

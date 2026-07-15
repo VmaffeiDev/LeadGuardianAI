@@ -10,8 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 export function ConfiguracoesView() {
   const [warningMinutes, setWarningMinutes] = useState(15);
   const [criticalMinutes, setCriticalMinutes] = useState(30);
+  const [savingThresholds, setSavingThresholds] = useState(false);
+
+  const [whatsappPhoneNumberId, setWhatsappPhoneNumberId] = useState("");
+  const [whatsappTemplateName, setWhatsappTemplateName] = useState("");
+  const [savingWhatsapp, setSavingWhatsapp] = useState(false);
+
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     fetch("/api/tenant").then(async (res) => {
@@ -22,14 +27,16 @@ export function ConfiguracoesView() {
           setWarningMinutes(t.warningMinutes);
           setCriticalMinutes(t.criticalMinutes);
         }
+        setWhatsappPhoneNumberId(data.tenant?.whatsappPhoneNumberId ?? "");
+        setWhatsappTemplateName(data.tenant?.whatsappTemplateName ?? "");
       }
       setLoading(false);
     });
   }, []);
 
-  async function handleSubmit(event: FormEvent) {
+  async function handleThresholdsSubmit(event: FormEvent) {
     event.preventDefault();
-    setSaving(true);
+    setSavingThresholds(true);
     try {
       const res = await fetch("/api/tenant", {
         method: "PATCH",
@@ -44,7 +51,28 @@ export function ConfiguracoesView() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao salvar");
     } finally {
-      setSaving(false);
+      setSavingThresholds(false);
+    }
+  }
+
+  async function handleWhatsappSubmit(event: FormEvent) {
+    event.preventDefault();
+    setSavingWhatsapp(true);
+    try {
+      const res = await fetch("/api/tenant", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ whatsappPhoneNumberId, whatsappTemplateName }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? "Erro ao salvar");
+      }
+      toast.success("Configuração de WhatsApp atualizada");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+    } finally {
+      setSavingWhatsapp(false);
     }
   }
 
@@ -54,7 +82,7 @@ export function ConfiguracoesView() {
     <div className="flex flex-col gap-4">
       <div>
         <h1 className="text-xl font-semibold">Configurações</h1>
-        <p className="text-sm text-muted-foreground">Limites de tempo sem resposta para alertas</p>
+        <p className="text-sm text-muted-foreground">Alertas e triagem automática via WhatsApp</p>
       </div>
 
       <Card className="max-w-md">
@@ -65,7 +93,7 @@ export function ConfiguracoesView() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <form onSubmit={handleThresholdsSubmit} className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="warning">Aviso (minutos sem resposta)</Label>
               <Input
@@ -88,8 +116,44 @@ export function ConfiguracoesView() {
                 onChange={(e) => setCriticalMinutes(Number(e.target.value))}
               />
             </div>
-            <Button type="submit" disabled={saving} className="w-fit">
-              {saving ? "Salvando..." : "Salvar"}
+            <Button type="submit" disabled={savingThresholds} className="w-fit">
+              {savingThresholds ? "Salvando..." : "Salvar"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-md">
+        <CardHeader>
+          <CardTitle className="text-sm">Triagem automática via WhatsApp</CardTitle>
+          <CardDescription>
+            Necessário pra importar leads em CSV: identifica de qual número os leads
+            importados recebem contato, e qual template aprovado no Meta Business Manager
+            usar na primeira mensagem.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleWhatsappSubmit} className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="phoneNumberId">Phone Number ID (Meta Cloud API)</Label>
+              <Input
+                id="phoneNumberId"
+                value={whatsappPhoneNumberId}
+                onChange={(e) => setWhatsappPhoneNumberId(e.target.value)}
+                placeholder="123456789012345"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="templateName">Nome do template aprovado</Label>
+              <Input
+                id="templateName"
+                value={whatsappTemplateName}
+                onChange={(e) => setWhatsappTemplateName(e.target.value)}
+                placeholder="primeiro_contato_lead"
+              />
+            </div>
+            <Button type="submit" disabled={savingWhatsapp} className="w-fit">
+              {savingWhatsapp ? "Salvando..." : "Salvar"}
             </Button>
           </form>
         </CardContent>

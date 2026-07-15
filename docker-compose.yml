@@ -71,6 +71,10 @@ services:
       REDIS_URL: redis://redis:6379
       AUTH_SECRET: ${AUTH_SECRET:?defina AUTH_SECRET no .env}
       AUTH_URL: ${AUTH_URL:-}
+      # Só necessárias para a triagem automática via WhatsApp (importação de leads):
+      # o webhook (recebido aqui em apps/web) precisa validar a origem da chamada.
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN:-}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -85,6 +89,9 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-leadguardian}:${POSTGRES_PASSWORD:-leadguardian}@postgres:5432/${POSTGRES_DB:-leadguardianai}
       REDIS_URL: redis://redis:6379
+      # Só necessárias para a triagem automática via WhatsApp (importação de leads).
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully

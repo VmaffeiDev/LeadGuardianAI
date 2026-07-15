@@ -3,8 +3,9 @@ import type { LeadStatus } from "@leadguardian/db";
 
 const STATUS_CONFIG: Record<
   LeadStatus,
-  { label: string; variant: "default" | "secondary" | "success" | "warning" | "destructive" }
+  { label: string; variant: "default" | "secondary" | "success" | "warning" | "destructive" | "outline" }
 > = {
+  EM_TRIAGEM: { label: "Em triagem (WhatsApp)", variant: "outline" },
   NOVO: { label: "Novo", variant: "secondary" },
   EM_ATENDIMENTO: { label: "Em atendimento", variant: "default" },
   EM_NEGOCIACAO: { label: "Em negociação", variant: "warning" },

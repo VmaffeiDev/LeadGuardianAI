@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { REALTIME_EVENTS, type LeadUpdatedPayload } from "@leadguardian/core/realtime";
-import type { LeadStatus } from "@leadguardian/db";
+import type { LeadStatus, LeadTemperature } from "@leadguardian/db";
 import { useSocketEvent } from "./use-socket";
 
 export interface LeadListItem {
@@ -12,6 +12,7 @@ export interface LeadListItem {
   email: string | null;
   source: string | null;
   status: LeadStatus;
+  temperature: LeadTemperature | null;
   lastInteractionAt: string;
   assignedTo: { id: string; name: string } | null;
 }

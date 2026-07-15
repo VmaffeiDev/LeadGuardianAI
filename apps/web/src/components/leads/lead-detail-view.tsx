@@ -9,11 +9,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LeadStatusBadge } from "./lead-status-badge";
+import { LeadTemperatureBadge } from "./lead-temperature-badge";
 import { IdleTimer } from "./idle-timer";
 import { useSocketEvent } from "@/hooks/use-socket";
 import { useTenantThresholds } from "@/hooks/use-tenant-thresholds";
 import { REALTIME_EVENTS, type LeadUpdatedPayload } from "@leadguardian/core/realtime";
-import type { LeadStatus } from "@leadguardian/db";
+import type { LeadStatus, LeadTemperature, Role } from "@leadguardian/db";
+
+const CAN_REASSIGN: Role[] = ["ADMIN", "GESTOR"];
 
 interface LeadEvent {
   id: string;
@@ -30,6 +33,8 @@ interface LeadDetail {
   email: string | null;
   source: string | null;
   status: LeadStatus;
+  temperature: LeadTemperature | null;
+  carInterest: string | null;
   lastInteractionAt: string;
   assignedTo: { id: string; name: string } | null;
   createdBy: { id: string; name: string } | null;
@@ -39,6 +44,10 @@ interface LeadDetail {
 // UI affordance only — which status buttons to offer. The state machine is
 // enforced authoritatively server-side in @leadguardian/core (changeLeadStatus).
 const NEXT_STATUS: Record<LeadStatus, LeadStatus[]> = {
+  // Transitions out of EM_TRIAGEM are system-driven (WhatsApp triage
+  // completing) — no manual button; see the "Distribuir mesmo assim" action
+  // for frio leads instead.
+  EM_TRIAGEM: [],
   NOVO: ["EM_ATENDIMENTO", "PERDIDO"],
   EM_ATENDIMENTO: ["EM_NEGOCIACAO", "PERDIDO"],
   EM_NEGOCIACAO: ["GANHO", "PERDIDO", "EM_ATENDIMENTO"],
@@ -47,6 +56,7 @@ const NEXT_STATUS: Record<LeadStatus, LeadStatus[]> = {
 };
 
 const STATUS_LABEL: Record<LeadStatus, string> = {
+  EM_TRIAGEM: "Em triagem (WhatsApp)",
   NOVO: "Novo",
   EM_ATENDIMENTO: "Em atendimento",
   EM_NEGOCIACAO: "Em negociação",
@@ -60,9 +70,10 @@ const EVENT_LABEL: Record<string, string> = {
   ASSIGNMENT: "Atribuição",
   ALERT: "Alerta",
   CONTACT: "Contato",
+  WHATSAPP: "WhatsApp",
 };
 
-export function LeadDetailView({ leadId }: { leadId: string }) {
+export function LeadDetailView({ leadId, role }: { leadId: string; role: Role }) {
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -99,6 +110,18 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       return;
     }
     toast.success(`Status atualizado para ${STATUS_LABEL[status]}`);
+    refetch();
+  }
+
+  async function handleDistribute() {
+    const res = await fetch(`/api/leads/${leadId}/distribuir`, { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      toast.error(data.error ?? "Erro ao distribuir lead");
+      return;
+    }
+    const data = await res.json();
+    toast.success(data.vendedor ? `Distribuído para ${data.vendedor.name}` : "Lead distribuído");
     refetch();
   }
 
@@ -144,6 +167,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         </div>
         <div className="flex items-center gap-2">
           <LeadStatusBadge status={lead.status} />
+          <LeadTemperatureBadge temperature={lead.temperature} />
           <IdleTimer
             since={lead.lastInteractionAt}
             warningMinutes={thresholds.warningMinutes}
@@ -181,7 +205,19 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               <CardTitle className="text-sm">Atualizar status</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
-              {NEXT_STATUS[lead.status].length === 0 && (
+              {lead.status === "EM_TRIAGEM" && (
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm text-muted-foreground">
+                    Aguardando triagem automática via WhatsApp.
+                  </p>
+                  {CAN_REASSIGN.includes(role) && (
+                    <Button size="sm" variant="outline" onClick={handleDistribute}>
+                      Distribuir mesmo assim
+                    </Button>
+                  )}
+                </div>
+              )}
+              {lead.status !== "EM_TRIAGEM" && NEXT_STATUS[lead.status].length === 0 && (
                 <p className="text-sm text-muted-foreground">Lead encerrado.</p>
               )}
               {NEXT_STATUS[lead.status].map((status) => (
@@ -225,6 +261,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <span className="text-muted-foreground">Cadastrado por:</span>{" "}
                 {lead.createdBy?.name ?? "-"}
               </p>
+              {lead.carInterest && (
+                <p>
+                  <span className="text-muted-foreground">Carro de interesse:</span>{" "}
+                  {lead.carInterest}
+                </p>
+              )}
               {lead.email && (
                 <p>
                   <span className="text-muted-foreground">E-mail:</span> {lead.email}
